@@ -1149,9 +1149,12 @@ impl ManagedEnvironment {
         local: &CoreEnvironment,
         generations: &Generations<State>,
     ) -> Result<bool, ManagedEnvironmentError> {
-        let local_lockfile_bytes = local.existing_lockfile_contents()?;
-        let remote_lockfile_bytes = generations.current_gen_lockfile().ok();
-        if local_lockfile_bytes != remote_lockfile_bytes {
+        let local_lockfile = local.existing_lockfile()?;
+        let remote_lockfile = generations
+            .current_gen_lockfile()
+            .ok()
+            .and_then(|bytes| bytes.parse::<Lockfile>().ok());
+        if local_lockfile != remote_lockfile {
             return Ok(false);
         }
 

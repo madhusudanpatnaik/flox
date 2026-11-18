@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions, TryLockError};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -204,8 +204,7 @@ impl EventsBuffer {
             .context("Could not lock v2 events buffer")?;
 
         remove_file_if_present(&data_dir.join(EVENTS_BUFFER_FILE_NAME))
-            .context("Could not delete v2 events buffer file")?;
-        remove_file_if_present(&lock_file_path).context("Could not delete v2 events lock file")
+            .context("Could not delete v2 events buffer file")
     }
 
     pub(crate) fn is_expired(&self, expiry: Duration) -> bool {
@@ -261,30 +260,29 @@ impl EventsBuffer {
 
     /// Persist the current in-memory buffer, replacing the file contents.
     pub fn overwrite_file(&mut self) -> Result<()> {
-        self.storage
-            .set_len(0)
-            .context("Could not truncate v2 events buffer file")?;
-
+        let mut out = Vec::new();
         for event in &self.buffer {
-            self.storage
-                .write_all(serde_json::to_string(event)?.as_bytes())
-                .context("Could not write v2 event to buffer file")?;
-            self.storage
-                .write_all(b"\n")
-                .context("Could not write v2 event buffer newline")?;
+            let serialized = serde_json::to_string(event)?;
+            out.extend_from_slice(serialized.as_bytes());
+            out.push(b'\n');
         }
 
         // Written back untouched, so a rewrite never drops what this binary
         // could not interpret.
         for line in &self.unknown {
-            self.storage
-                .write_all(line.as_bytes())
-                .context("Could not write retained v2 event to buffer file")?;
-            self.storage
-                .write_all(b"\n")
-                .context("Could not write v2 event buffer newline")?;
+            out.extend_from_slice(line.as_bytes());
+            out.push(b'\n');
         }
 
+        self.storage
+            .seek(SeekFrom::Start(0))
+            .context("Could not rewind v2 events buffer file")?;
+        self.storage
+            .set_len(0)
+            .context("Could not truncate v2 events buffer file")?;
+        self.storage
+            .write_all(&out)
+            .context("Could not write v2 events to buffer file")?;
         self.storage
             .flush()
             .context("Could not flush v2 events buffer file")?;
@@ -315,12 +313,11 @@ impl EventsBuffer {
             .buffer
             .back()
             .expect("buffer has a just-pushed v2 event");
+        let mut line = serde_json::to_string(event)?;
+        line.push('\n');
         self.storage
-            .write_all(serde_json::to_string(event)?.as_bytes())
+            .write_all(line.as_bytes())
             .context("Could not write new v2 event to buffer file")?;
-        self.storage
-            .write_all(b"\n")
-            .context("Could not write v2 event buffer newline")?;
         self.storage
             .flush()
             .context("Could not flush v2 events buffer file")?;
