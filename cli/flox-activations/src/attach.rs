@@ -244,12 +244,18 @@ pub(crate) fn write_to_writer(ctx: &StartupCtx, writer: &mut impl std::io::Write
 }
 
 fn write_to_path(ctx: &StartupCtx, path: &Path) -> Result<()> {
-    let mut writer = OpenOptions::new()
+    let mut options = OpenOptions::new();
+    options
         .create(true)
         .read(true)
         .write(true)
-        .truncate(true)
-        .open(path)?;
+        .truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut writer = options.open(path)?;
     write_to_writer(ctx, &mut writer)
 }
 

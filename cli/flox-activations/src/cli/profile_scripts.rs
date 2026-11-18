@@ -114,7 +114,8 @@ fn source_profile_scripts_cmds_activate(
                 dir.join(format!("activate.d/profile-{shell}")),
             ] {
                 if path_predicate(&path) {
-                    cmds.push(format!("source '{}';", path.display()));
+                    let escaped = shell_escape::escape(path.to_string_lossy());
+                    cmds.push(format!("source {escaped};"));
                 } else {
                     debug!(path = %path.display(), "script did not exist");
                 }
@@ -151,7 +152,8 @@ fn source_profile_scripts_cmds_deactivate(
         env.join("activate.d/deactivate-profile-common"),
     ] {
         if path_predicate(&path) {
-            cmds.push(format!("source '{}';", path.display()));
+            let escaped = shell_escape::escape(path.to_string_lossy());
+            cmds.push(format!("source {escaped};"));
         } else {
             debug!(path = %path.display(), "script did not exist");
         }

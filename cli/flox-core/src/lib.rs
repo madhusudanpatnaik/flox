@@ -43,11 +43,14 @@ pub fn path_hash(p: impl AsRef<Path>) -> String {
 /// Lock the returned file with [File::lock] or [File::try_lock].
 /// The lock is released when the file is dropped.
 pub fn open_lock_file(path: impl AsRef<Path>) -> std::io::Result<File> {
-    File::options()
-        .write(true)
-        .create(true)
-        .truncate(false)
-        .open(path)
+    let mut options = File::options();
+    options.write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
 }
 
 #[derive(Debug, thiserror::Error)]

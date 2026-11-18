@@ -202,17 +202,17 @@ pub fn generate_bash_profile_commands(
     // RC files to perform activations.
     match action {
         Action::Activate { args, .. } => {
+            let escaped_flox_activations =
+                shell_escape::escape(args.flox_activations.to_string_lossy());
+            let escaped_flox_env = shell_escape::escape(args.flox_env.to_string_lossy());
             stmts.push(format!(
-                r#"eval "$('{}' set-env-dirs --shell {} --flox-env "{}" --env-dirs "${{FLOX_ENV_DIRS:-}}" --sbin-dirs "${{_FLOX_ENV_DIRS_ADD_SBIN:-}}"{})";"#,
-                args.flox_activations.display(),
-                Shell::Bash,
-                args.flox_env.display(),
-                if args.add_sbin { " --add-sbin" } else { "" },
+                r#"eval "$({escaped_flox_activations} set-env-dirs --shell {shell} --flox-env {escaped_flox_env} --env-dirs "${{FLOX_ENV_DIRS:-}}" --sbin-dirs "${{_FLOX_ENV_DIRS_ADD_SBIN:-}}"{add_sbin})";"#,
+                shell = Shell::Bash,
+                add_sbin = if args.add_sbin { " --add-sbin" } else { "" },
             ).to_stmt());
             stmts.push(format!(
-                r#"eval "$('{}' fix-paths --shell {} --env-dirs "$FLOX_ENV_DIRS" --sbin-dirs "${{_FLOX_ENV_DIRS_ADD_SBIN:-}}" --path "$PATH" --manpath "${{MANPATH:-}}")";"#,
-                args.flox_activations.display(),
-                Shell::Bash,
+                r#"eval "$({escaped_flox_activations} fix-paths --shell {shell} --env-dirs "$FLOX_ENV_DIRS" --sbin-dirs "${{_FLOX_ENV_DIRS_ADD_SBIN:-}}" --path "$PATH" --manpath "${{MANPATH:-}}")";"#,
+                shell = Shell::Bash,
             ).to_stmt());
         },
         Action::Deactivate(_) => {
@@ -222,10 +222,11 @@ pub fn generate_bash_profile_commands(
 
     match action {
         Action::Activate { args, .. } => {
+            let escaped_flox_activations =
+                shell_escape::escape(args.flox_activations.to_string_lossy());
             stmts.push(format!(
-                r#"eval "$('{}' profile-scripts --shell {} --already-sourced-env-dirs "${{_FLOX_SOURCED_PROFILE_SCRIPTS:-}}" --env-dirs "${{FLOX_ENV_DIRS:-}}")";"#,
-                args.flox_activations.display(),
-                Shell::Bash,
+                r#"eval "$({escaped_flox_activations} profile-scripts --shell {shell} --already-sourced-env-dirs "${{_FLOX_SOURCED_PROFILE_SCRIPTS:-}}" --env-dirs "${{FLOX_ENV_DIRS:-}}")";"#,
+                shell = Shell::Bash,
             ).to_stmt());
         },
         Action::Deactivate(ctx) => {
@@ -237,12 +238,13 @@ pub fn generate_bash_profile_commands(
             // (outermost deactivate) or restored it to the outer env's
             // value (nested), so runtime `$FLOX_ENV` is not a reliable
             // handle on the env we're tearing down.
+            let escaped_flox_activations =
+                shell_escape::escape(ctx.flox_activations.to_string_lossy());
+            let escaped_flox_env = shell_escape::escape(ctx.flox_env.to_string_lossy());
             stmts.push(
                 format!(
-                    r#"eval "$('{}' profile-scripts-deactivate --shell {} --env '{}' --already-sourced-env-dirs "${{_FLOX_SOURCED_PROFILE_SCRIPTS:-}}")";"#,
-                    ctx.flox_activations.display(),
-                    Shell::Bash,
-                    ctx.flox_env.display()
+                    r#"eval "$({escaped_flox_activations} profile-scripts-deactivate --shell {shell} --env {escaped_flox_env} --already-sourced-env-dirs "${{_FLOX_SOURCED_PROFILE_SCRIPTS:-}}")";"#,
+                    shell = Shell::Bash,
                 )
                 .to_stmt(),
             );
