@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fmt::Display;
+use std::fmt::{self, Display};
 use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 
@@ -90,7 +90,7 @@ pub struct Config {
 }
 
 /// Describes the Configuration for the flox library
-#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+#[derive(Clone, Deserialize, Serialize, Default)]
 pub struct FloxConfig {
     /// Disable collecting and sending usage metrics
     /// Prefer `Flox.metrics_device_uuid.is_some()` if both are available.
@@ -224,6 +224,42 @@ pub struct FloxConfig {
     /// This disables auto-activation as well as features like `flox deactivate`
     /// without `--print-script` (default: false)
     pub disable_hook: Option<bool>,
+}
+
+impl fmt::Debug for FloxConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FloxConfig")
+            .field("disable_metrics", &self.disable_metrics)
+            .field("cache_dir", &self.cache_dir)
+            .field("data_dir", &self.data_dir)
+            .field("state_dir", &self.state_dir)
+            .field("config_dir", &self.config_dir)
+            .field(
+                "floxhub_token",
+                &self.floxhub_token.as_ref().map(|_| "***"),
+            )
+            .field("search_limit", &self.search_limit)
+            .field("trusted_environments", &self.trusted_environments)
+            .field("floxhub_url", &self.floxhub_url)
+            .field("catalog_url", &self.catalog_url)
+            .field("catalog_flake_fetcher", &self.catalog_flake_fetcher)
+            .field("floxhub_authn_mode", &self.floxhub_authn_mode)
+            .field("floxhub_token_storage", &self.floxhub_token_storage)
+            .field("shell_prompt", &self.shell_prompt)
+            .field("set_prompt", &self.set_prompt)
+            .field("hide_default_prompt", &self.hide_default_prompt)
+            .field("upgrade_notifications", &self.upgrade_notifications)
+            .field("auth_notifications", &self.auth_notifications)
+            .field("publish", &self.publish)
+            .field("installer_channel", &self.installer_channel)
+            .field("keep_tempdir", &self.keep_tempdir)
+            .field("auto_activate", &self.auto_activate)
+            .field("auto_activate_fish_mode", &self.auto_activate_fish_mode)
+            .field("auto_activate_environments", &self.auto_activate_environments)
+            .field("run_preferences", &self.run_preferences)
+            .field("disable_hook", &self.disable_hook)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -575,5 +611,14 @@ mod tests {
             resolve(&entries, "/w/a"),
             Some(AutoActivationPreference::Allow)
         );
+    }
+
+    #[test]
+    fn flox_config_debug_masks_floxhub_token() {
+        let mut config = FloxConfig::default();
+        config.floxhub_token = Some("secret_token_12345".to_string());
+        let debug_str = format!("{config:?}");
+        assert!(!debug_str.contains("secret_token_12345"));
+        assert!(debug_str.contains("floxhub_token: Some(\"***\")"));
     }
 }

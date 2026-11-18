@@ -116,16 +116,19 @@ impl FromStr for FloxVersion {
         if let Some(captures) = re.captures(version_str) {
             let pre_name = captures
                 .name("pre_name")
-                .map(|s| s.as_str().parse().unwrap());
+                .map(|s| s.as_str().parse().map_err(|_| VersionParseError::InvalidFormat))
+                .transpose()?;
             let pre_number = captures
                 .name("pre_number")
-                .map(|s| s.as_str().parse().unwrap());
+                .map(|s| s.as_str().parse().map_err(VersionParseError::InvalidNumber))
+                .transpose()?;
             let num_of_commits = captures
                 .name("num_of_commits")
-                .map(|s| s.as_str().parse().unwrap());
+                .map(|s| s.as_str().parse().map_err(VersionParseError::InvalidNumber))
+                .transpose()?;
             let commit_vcs = captures
                 .name("commit_vcs")
-                .map(|s| s.as_str().chars().next().unwrap());
+                .and_then(|s| s.as_str().chars().next());
             let commit_sha = captures.name("commit_sha").map(|s| s.as_str().to_string());
 
             // When there is pre release commit fields shouldn't be there

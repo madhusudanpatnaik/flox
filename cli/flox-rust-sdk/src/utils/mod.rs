@@ -37,7 +37,22 @@ const SENSITIVE_ENV_VARS: &[&str] = &[
     "AWS_ACCESS_KEY_ID",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
+    "GITHUB_TOKEN",
+    "GITLAB_TOKEN",
+    "NIX_CONFIG",
+    "FLOX_CONFIG",
+    "TOKEN",
+    "SECRET",
 ];
+
+/// Checks if an environment variable name is considered sensitive and should be redacted.
+pub fn is_sensitive_env_var(name: &str) -> bool {
+    SENSITIVE_ENV_VARS.contains(&name)
+        || name.ends_with("_TOKEN")
+        || name.ends_with("_KEY")
+        || name.ends_with("_SECRET")
+        || name.ends_with("_PASSWORD")
+}
 
 pub static FLOX_INTERPRETER: LazyLock<PathBuf> = LazyLock::new(|| {
     PathBuf::from(env::var("FLOX_INTERPRETER").unwrap_or(env!("FLOX_INTERPRETER").to_string()))
@@ -142,7 +157,7 @@ impl Display for DisplayCommand<'_> {
                 let v = v.to_string_lossy();
                 let redacted_value = k
                     .to_str()
-                    .and_then(|s| SENSITIVE_ENV_VARS.contains(&s).then_some("***"))
+                    .and_then(|s| is_sensitive_env_var(s).then_some("***"))
                     .unwrap_or(&v);
 
                 format!(
