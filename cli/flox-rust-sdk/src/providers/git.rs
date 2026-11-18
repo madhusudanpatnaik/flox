@@ -158,16 +158,20 @@ pub trait GitProvider: Sized + std::fmt::Debug {
     fn path(&self) -> &Path;
 }
 
-/// Scrubs sensitive credentials (tokens, passwords in URLs, authorization headers) from git output.
+/// Scrubs sensitive credentials (tokens, passwords in URLs, authorization headers, query params) from git output.
 pub fn sanitize_git_credentials(text: &str) -> String {
     static URL_CREDS_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(https?://)([^/\s@]+)@").unwrap()
+        Regex::new(r"((?:https?|ssh)://)([^/\s@]+)@").unwrap()
     });
     static BEARER_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)\b(bearer|token|basic)\s+[a-zA-Z0-9_\-\./+=]+").unwrap()
     });
+    static QUERY_PARAM_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)([?&](?:access_)?(?:token|secret|key|password)=)[^&\s]+").unwrap()
+    });
     let sanitized = URL_CREDS_RE.replace_all(text, "${1}***@");
     let sanitized = BEARER_RE.replace_all(&sanitized, "${1} ***");
+    let sanitized = QUERY_PARAM_RE.replace_all(&sanitized, "${1}***");
     sanitized.into_owned()
 }
 
@@ -2505,6 +2509,18 @@ pub mod tests {
         assert_eq!(
             sanitize_git_credentials(bearer),
             "headers: Authorization: Bearer ***"
+        );
+
+        let ssh_url = "fatal: clone failed ssh://git:mysecretpass@github.com/repo.git";
+        assert_eq!(
+            sanitize_git_credentials(ssh_url),
+            "fatal: clone failed ssh://***@github.com/repo.git"
+        );
+
+        let query_param = "fetching https://example.com/repo.git?access_token=secret123&foo=bar";
+        assert_eq!(
+            sanitize_git_credentials(query_param),
+            "fetching https://example.com/repo.git?access_token=***&foo=bar"
         );
 
         let bad_exit = GitCommandError::BadExit(
