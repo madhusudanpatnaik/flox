@@ -1268,6 +1268,11 @@ fn services_socket_path(id: &str, flox: &Flox) -> Result<PathBuf, EnvironmentErr
 
     std::fs::create_dir_all(runtime_dir)
         .map_err(EnvironmentError::CreateServicesSocketDirectory)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(runtime_dir, std::fs::Permissions::from_mode(0o700));
+    }
 
     Ok(socket_path)
 }

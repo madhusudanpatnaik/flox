@@ -298,10 +298,20 @@ impl FloxArgs {
             Err(_) => config.flox.cache_dir.join("run"),
         };
         tokio::fs::create_dir_all(&runtime_dir).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = tokio::fs::set_permissions(&runtime_dir, std::fs::Permissions::from_mode(0o700)).await;
+        }
 
         // prepare a temp dir for the run:
         let process_dir = config.flox.cache_dir.join("process");
         tokio::fs::create_dir_all(&process_dir).await?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = tokio::fs::set_permissions(&process_dir, std::fs::Permissions::from_mode(0o700)).await;
+        }
 
         // `temp_dir` will automatically be removed from disk when the function returns
         let temp_dir = TempDir::new_in(process_dir)?;

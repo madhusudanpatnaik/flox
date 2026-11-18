@@ -21,9 +21,9 @@ _flox_set_prompt() {
   # turned off.
   local _flox
   if [[ $(shopt) =~ progcomp ]] && [[ "${NO_COLOR:-0}" == "0" ]]; then
-    _flox=$(echo -e -n "${colorBold}${FLOX_PROMPT-$_floxPrompt1} ${_floxPrompt2}${colorReset} ")
+    _flox=$(printf '%s' "${colorBold}${FLOX_PROMPT-$_floxPrompt1} ${_floxPrompt2}${colorReset} ")
   else
-    _flox=$(echo -e -n "${FLOX_PROMPT-flox} [$FLOX_PROMPT_ENVIRONMENTS] ")
+    _flox=$(printf '%s' "${FLOX_PROMPT-flox} [$FLOX_PROMPT_ENVIRONMENTS] ")
   fi
 
   # Start by saving the original value of PS1.
