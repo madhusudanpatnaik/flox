@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Utc};
+use regex::Regex;
 use thiserror::Error;
 use tracing::debug;
 
@@ -157,25 +158,73 @@ pub trait GitProvider: Sized + std::fmt::Debug {
     fn path(&self) -> &Path;
 }
 
-#[derive(Error, Debug)]
+/// Scrubs sensitive credentials (tokens, passwords in URLs, authorization headers, query params) from git output.
+pub fn sanitize_git_credentials(text: &str) -> String {
+    static URL_CREDS_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"((?:https?|ssh)://)([^/\s@]+)@").unwrap()
+    });
+    static BEARER_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(bearer|token|basic)\s+[a-zA-Z0-9_\-\./+=]+").unwrap()
+    });
+    static QUERY_PARAM_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)([?&](?:access_)?(?:token|secret|key|password)=)[^&\s]+").unwrap()
+    });
+    let sanitized = URL_CREDS_RE.replace_all(text, "${1}***@");
+    let sanitized = BEARER_RE.replace_all(&sanitized, "${1} ***");
+    let sanitized = QUERY_PARAM_RE.replace_all(&sanitized, "${1}***");
+    sanitized.into_owned()
+}
+
+#[derive(Debug)]
 pub enum GitCommandError {
-    #[error("Failed to run git: {0}")]
-    Command(#[from] std::io::Error),
-    #[error("Git failed with: [exit code {0}]\n  stdout: {1}\n  stderr: {2}")]
+    Command(std::io::Error),
     BadExit(i32, String, String),
-    #[error("Git output was invalid: {0}")]
     InvalidOutput(String),
-    #[error("Remote URL was invalid")]
-    InvalidUrl(#[source] url::ParseError),
-    #[error("remote branch '{remote}/{branch}' does not exist")]
+    InvalidUrl(url::ParseError),
     MissingRemoteBranch { remote: String, branch: String },
     /// The local history is truncated, so ancestry and revision counts
     /// computed from it would be unreliable.
-    #[error("the repository is a shallow clone")]
     ShallowRepository,
     /// The remote branch tip is not among the local objects.
-    #[error("tip of remote branch '{remote}/{branch}' is not present locally")]
     RemoteTipNotFetched { remote: String, branch: String },
+}
+
+impl std::fmt::Display for GitCommandError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Command(err) => write!(f, "Failed to run git: {err}"),
+            Self::BadExit(code, stdout, stderr) => {
+                let sanitized_stdout = sanitize_git_credentials(stdout);
+                let sanitized_stderr = sanitize_git_credentials(stderr);
+                write!(f, "Git failed with: [exit code {code}]\n  stdout: {sanitized_stdout}\n  stderr: {sanitized_stderr}")
+            },
+            Self::InvalidOutput(msg) => write!(f, "Git output was invalid: {msg}"),
+            Self::InvalidUrl(_) => write!(f, "Remote URL was invalid"),
+            Self::MissingRemoteBranch { remote, branch } => {
+                write!(f, "remote branch '{remote}/{branch}' does not exist")
+            },
+            Self::ShallowRepository => write!(f, "the repository is a shallow clone"),
+            Self::RemoteTipNotFetched { remote, branch } => {
+                write!(f, "tip of remote branch '{remote}/{branch}' is not present locally")
+            },
+        }
+    }
+}
+
+impl std::error::Error for GitCommandError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Command(err) => Some(err),
+            Self::InvalidUrl(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for GitCommandError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Command(err)
+    }
 }
 
 impl GitCommandError {
@@ -187,6 +236,9 @@ impl GitCommandError {
                 if stderr.contains("DENIED")
                     || stderr.contains("Authentication failed")
                     || stderr.contains("Permission denied")
+                    || stderr.contains("error: 401")
+                    || stderr.contains("error: 403")
+                    || stderr.contains("terminal prompts disabled")
         )
     }
 }
@@ -444,8 +496,8 @@ impl GitCommandProvider {
         let out = command.output()?;
 
         if !out.status.success() {
-            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stdout = sanitize_git_credentials(&String::from_utf8_lossy(&out.stdout).trim());
+            let stderr = sanitize_git_credentials(&String::from_utf8_lossy(&out.stderr).trim());
 
             return Err(GitCommandError::BadExit(
                 out.status.code().unwrap_or(-1),
@@ -791,11 +843,12 @@ impl GitCommandProvider {
         }
 
         let flag = match GitCommandProvider::run_command(&mut command) {
-            Ok(out) => PushFlag::from_stdout(&out.to_string_lossy())
-                .expect("canonical git output should parse"),
-            Err(ref err @ GitCommandError::BadExit(_, _, ref stderr))
-                if stderr.contains("DENIED") || stderr.contains("Authentication failed") =>
-            {
+            Ok(out) => PushFlag::from_stdout(&out.to_string_lossy()).map_err(|e| {
+                GitRemoteCommandError::Command(GitCommandError::InvalidOutput(format!(
+                    "failed to parse git push porcelain output: {e}"
+                )))
+            })?,
+            Err(ref err) if err.is_access_denied() => {
                 debug!("Access denied: {err}");
                 return Err(GitRemoteCommandError::AccessDenied);
             },
@@ -946,40 +999,36 @@ impl From<GitCommandError> for GitRemoteCommandError {
                 debug!("Access denied: {err}");
                 GitRemoteCommandError::AccessDenied
             },
-            GitCommandError::BadExit(_, ref stdout, _)
-                if stdout.contains("[rejected] (fetch first)") =>
+            GitCommandError::BadExit(_, ref stdout, ref stderr)
+                if stdout.contains("[rejected] (fetch first)")
+                    || stdout.contains("[rejected] (non-fast-forward)")
+                    || stderr.contains("[rejected] (fetch first)")
+                    || stderr.contains("[rejected] (non-fast-forward)") =>
             {
                 debug!("Branches diverged: {err}");
                 GitRemoteCommandError::Diverged
             },
-            GitCommandError::BadExit(_, _, ref stderr)
-                if stderr.starts_with(REF_NOT_FOUND_ERR_PREFIX) =>
-            {
-                let ref_name = stderr.strip_prefix(REF_NOT_FOUND_ERR_PREFIX).unwrap();
-                debug!("Ref not found: {ref_name}");
-                GitRemoteCommandError::RefNotFound(ref_name.to_string())
-            },
-            GitCommandError::BadExit(_, _, ref stderr)
-                if stderr.starts_with(REMOTE_BRANCH_NOT_FOUND_ERR_PREFIX) =>
-            {
-                let branch_name = stderr
-                    .strip_prefix(REMOTE_BRANCH_NOT_FOUND_ERR_PREFIX)
-                    .unwrap();
-                let branch_name = branch_name.strip_suffix(" to clone").unwrap_or(branch_name);
-                debug!("Could not find remote branch: {branch_name}");
-                GitRemoteCommandError::RefNotFound(branch_name.to_string())
-            },
-            GitCommandError::BadExit(_, _, ref stderr)
-                if stderr.starts_with(REMOTE_BRANCH_NOT_FOUND_IN_UPSTREAM_ERR_PREFIX) =>
-            {
-                let branch_name = stderr
-                    .strip_prefix(REMOTE_BRANCH_NOT_FOUND_IN_UPSTREAM_ERR_PREFIX)
-                    .unwrap();
-                let branch_name = branch_name
-                    .strip_suffix(" not found in upstream origin")
-                    .unwrap_or(branch_name);
-                debug!("Could not find remote branch in upstream: {branch_name}");
-                GitRemoteCommandError::RefNotFound(branch_name.to_string())
+            GitCommandError::BadExit(_, _, ref stderr) => {
+                for line in stderr.lines().map(str::trim) {
+                    if let Some(ref_name) = line.strip_prefix(REF_NOT_FOUND_ERR_PREFIX) {
+                        let ref_name = ref_name.trim();
+                        debug!("Ref not found: {ref_name}");
+                        return GitRemoteCommandError::RefNotFound(ref_name.to_string());
+                    }
+                    if let Some(branch_name) = line.strip_prefix(REMOTE_BRANCH_NOT_FOUND_ERR_PREFIX) {
+                        let branch_name = branch_name.trim();
+                        let branch_name = branch_name.strip_suffix(" to clone").unwrap_or(branch_name).trim();
+                        debug!("Could not find remote branch: {branch_name}");
+                        return GitRemoteCommandError::RefNotFound(branch_name.to_string());
+                    }
+                    if let Some(branch_name) = line.strip_prefix(REMOTE_BRANCH_NOT_FOUND_IN_UPSTREAM_ERR_PREFIX) {
+                        let branch_name = branch_name.trim();
+                        let branch_name = branch_name.strip_suffix(" not found in upstream origin").unwrap_or(branch_name).trim();
+                        debug!("Could not find remote branch in upstream: {branch_name}");
+                        return GitRemoteCommandError::RefNotFound(branch_name.to_string());
+                    }
+                }
+                GitRemoteCommandError::Command(err)
             },
             e => GitRemoteCommandError::Command(e),
         }
@@ -1399,14 +1448,14 @@ impl GitProvider for GitCommandProvider {
             } else {
                 Err(GitCommandError::BadExit(
                     1,
-                    out.into_string().unwrap(),
+                    out.to_string_lossy().into_owned(),
                     "Unable to parse rev-list output".to_string(),
                 ))
             }
         } else {
             Err(GitCommandError::BadExit(
                 1,
-                out.into_string().unwrap(),
+                out.to_string_lossy().into_owned(),
                 "Unable to parse rev-list output".to_string(),
             ))
         }
@@ -1427,14 +1476,14 @@ impl GitProvider for GitCommandProvider {
             } else {
                 Err(GitCommandError::BadExit(
                     1,
-                    out.into_string().unwrap(),
+                    out.to_string_lossy().into_owned(),
                     "Unable to parse date in git show output".to_string(),
                 ))
             }
         } else {
             Err(GitCommandError::BadExit(
                 1,
-                out.into_string().unwrap(),
+                out.to_string_lossy().into_owned(),
                 "Git show command returned an error.".to_string(),
             ))
         }
@@ -2416,9 +2465,74 @@ pub mod tests {
         );
         assert!(permission.is_access_denied());
 
+        let http_401 = GitCommandError::BadExit(
+            128,
+            String::new(),
+            "fatal: unable to access 'https://github.com/org/repo': The requested URL returned error: 401".to_string(),
+        );
+        assert!(http_401.is_access_denied());
+
+        let http_403 = GitCommandError::BadExit(
+            128,
+            String::new(),
+            "fatal: unable to access 'https://github.com/org/repo': The requested URL returned error: 403".to_string(),
+        );
+        assert!(http_403.is_access_denied());
+
+        let no_terminal = GitCommandError::BadExit(
+            128,
+            String::new(),
+            "fatal: could not read Username for 'https://github.com': terminal prompts disabled".to_string(),
+        );
+        assert!(no_terminal.is_access_denied());
+
         let other =
             GitCommandError::BadExit(1, String::new(), "fatal: not a git repository".to_string());
         assert!(!other.is_access_denied());
+    }
+
+    #[test]
+    fn credential_sanitization_in_git_output() {
+        let url_with_token = "error: clone failed https://ghp_secret12345@github.com/repo.git";
+        assert_eq!(
+            sanitize_git_credentials(url_with_token),
+            "error: clone failed https://***@github.com/repo.git"
+        );
+
+        let url_with_user_pass = "failed http://alice:supersecret@example.com/repo.git";
+        assert_eq!(
+            sanitize_git_credentials(url_with_user_pass),
+            "failed http://***@example.com/repo.git"
+        );
+
+        let bearer = "headers: Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.test";
+        assert_eq!(
+            sanitize_git_credentials(bearer),
+            "headers: Authorization: Bearer ***"
+        );
+
+        let ssh_url = "fatal: clone failed ssh://git:mysecretpass@github.com/repo.git";
+        assert_eq!(
+            sanitize_git_credentials(ssh_url),
+            "fatal: clone failed ssh://***@github.com/repo.git"
+        );
+
+        let query_param = "fetching https://example.com/repo.git?access_token=secret123&foo=bar";
+        assert_eq!(
+            sanitize_git_credentials(query_param),
+            "fetching https://example.com/repo.git?access_token=***&foo=bar"
+        );
+
+        let bad_exit = GitCommandError::BadExit(
+            1,
+            "stdout https://token@host/repo".to_string(),
+            "stderr Bearer mysecrettoken".to_string(),
+        );
+        let displayed = bad_exit.to_string();
+        assert!(!displayed.contains("token@host"));
+        assert!(!displayed.contains("mysecrettoken"));
+        assert!(displayed.contains("***@host"));
+        assert!(displayed.contains("Bearer ***"));
     }
 
     #[test]

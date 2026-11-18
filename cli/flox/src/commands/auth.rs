@@ -204,9 +204,8 @@ pub async fn authorize(
 
     let verification_uri = details
         .verification_uri_complete()
-        .expect("Verification URI is always provided by the auth server")
-        .secret()
-        .as_str();
+        .map(|uri| uri.secret().as_str())
+        .unwrap_or_else(|| details.verification_uri().secret().as_str());
     let code = details.user_code().secret();
 
     // Start token polling — shared by both the browser and no-browser paths.

@@ -28,11 +28,15 @@ pub static DEFAULT_OWNER: &str = "local";
 )]
 pub struct EnvironmentOwner(String);
 
+fn is_invalid_env_char(c: char) -> bool {
+    c.is_whitespace() || c.is_control() || c == '/' || c == '\\'
+}
+
 impl FromStr for EnvironmentOwner {
     type Err = RemoteEnvironmentRefError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if [' ', '/'].iter().any(|c| s.contains(*c)) {
+        if s.is_empty() || s == "." || s == ".." || s.chars().any(is_invalid_env_char) {
             Err(RemoteEnvironmentRefError::InvalidOwner(s.to_string()))?
         }
 
@@ -48,7 +52,15 @@ impl proptest::arbitrary::Arbitrary for EnvironmentName {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
 
-        "[^ /]".prop_map(|s| EnvironmentName(s.to_string())).boxed()
+        "[^ \t\r\n/\\\\]"
+            .prop_filter("not dot or control", |s| {
+                !s.is_empty()
+                    && s != "."
+                    && s != ".."
+                    && !s.chars().any(|c| c.is_control() || c.is_whitespace())
+            })
+            .prop_map(|s| EnvironmentName(s.to_string()))
+            .boxed()
     }
 }
 
@@ -72,7 +84,7 @@ impl FromStr for EnvironmentName {
     type Err = RemoteEnvironmentRefError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if [' ', '/'].iter().any(|c| s.contains(*c)) {
+        if s.is_empty() || s == "." || s == ".." || s.chars().any(is_invalid_env_char) {
             Err(RemoteEnvironmentRefError::InvalidName(s.to_string()))?
         }
 
@@ -88,7 +100,13 @@ impl proptest::arbitrary::Arbitrary for EnvironmentOwner {
     fn arbitrary_with(_: Self::Parameters) -> Self::Strategy {
         use proptest::prelude::Strategy;
 
-        "[^ /]"
+        "[^ \t\r\n/\\\\]"
+            .prop_filter("not dot or control", |s| {
+                !s.is_empty()
+                    && s != "."
+                    && s != ".."
+                    && !s.chars().any(|c| c.is_control() || c.is_whitespace())
+            })
             .prop_map(|s| EnvironmentOwner(s.to_string()))
             .boxed()
     }
@@ -199,5 +217,31 @@ impl ActivateEnvironmentRef {
                 format!("-r {}", escape(remote.to_string().into()))
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_path_traversal_and_invalid_chars() {
+        assert!(EnvironmentOwner::from_str("..").is_err());
+        assert!(EnvironmentOwner::from_str(".").is_err());
+        assert!(EnvironmentOwner::from_str("").is_err());
+        assert!(EnvironmentOwner::from_str("a/b").is_err());
+        assert!(EnvironmentOwner::from_str("a\\b").is_err());
+        assert!(EnvironmentOwner::from_str("a\nb").is_err());
+        assert!(EnvironmentOwner::from_str("a\0b").is_err());
+        assert!(EnvironmentOwner::from_str("valid-owner_123").is_ok());
+
+        assert!(EnvironmentName::from_str("..").is_err());
+        assert!(EnvironmentName::from_str(".").is_err());
+        assert!(EnvironmentName::from_str("").is_err());
+        assert!(EnvironmentName::from_str("a/b").is_err());
+        assert!(EnvironmentName::from_str("a\\b").is_err());
+        assert!(EnvironmentName::from_str("a\rb").is_err());
+        assert!(EnvironmentName::from_str("a\0b").is_err());
+        assert!(EnvironmentName::from_str("valid-name_456").is_ok());
     }
 }

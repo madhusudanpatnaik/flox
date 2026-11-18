@@ -89,12 +89,11 @@ impl BareToken {
     }
 
     /// The wall-clock expiry of the token, from the `exp` claim;
-    /// `None` when the token doesn't carry one.
+    /// `None` when the token doesn't carry one or has an invalid timestamp.
     pub fn expires_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
-        self.claims.exp.map(|exp| {
-            chrono::DateTime::from_timestamp(exp as i64, 0)
-                .expect("the exp claim is a valid unix timestamp")
-        })
+        self.claims
+            .exp
+            .and_then(|exp| chrono::DateTime::from_timestamp(exp as i64, 0))
     }
 }
 
