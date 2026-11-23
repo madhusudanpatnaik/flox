@@ -161,15 +161,19 @@ pub trait GitProvider: Sized + std::fmt::Debug {
 /// Scrubs sensitive credentials (tokens, passwords in URLs, authorization headers, query params) from git output.
 pub fn sanitize_git_credentials(text: &str) -> String {
     static URL_CREDS_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"((?:https?|ssh)://)([^/\s@]+)@").unwrap()
+        Regex::new(r"((?:https?|ssh)://)(?:([^/\s@:]+):([^/\s@]+)|(?!git@)([^/\s@]+))@").unwrap()
+    });
+    static AUTH_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\b(authorization:\s*(?:basic|bearer)\s+)\S+").unwrap()
     });
     static BEARER_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?i)\b(bearer|token|basic)\s+[a-zA-Z0-9_\-\./+=]+").unwrap()
+        Regex::new(r"(?i)\b(bearer)\s+[a-zA-Z0-9_\-\./+=]+").unwrap()
     });
     static QUERY_PARAM_RE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(r"(?i)([?&](?:access_)?(?:token|secret|key|password)=)[^&\s]+").unwrap()
     });
     let sanitized = URL_CREDS_RE.replace_all(text, "${1}***@");
+    let sanitized = AUTH_HEADER_RE.replace_all(&sanitized, "${1}***");
     let sanitized = BEARER_RE.replace_all(&sanitized, "${1} ***");
     let sanitized = QUERY_PARAM_RE.replace_all(&sanitized, "${1}***");
     sanitized.into_owned()
@@ -496,8 +500,8 @@ impl GitCommandProvider {
         let out = command.output()?;
 
         if !out.status.success() {
-            let stdout = sanitize_git_credentials(&String::from_utf8_lossy(&out.stdout).trim());
-            let stderr = sanitize_git_credentials(&String::from_utf8_lossy(&out.stderr).trim());
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
 
             return Err(GitCommandError::BadExit(
                 out.status.code().unwrap_or(-1),
@@ -2516,6 +2520,20 @@ pub mod tests {
             sanitize_git_credentials(ssh_url),
             "fatal: clone failed ssh://***@github.com/repo.git"
         );
+
+        let ssh_standard = "git clone ssh://git@github.com/repo.git";
+        assert_eq!(
+            sanitize_git_credentials(ssh_standard),
+            "git clone ssh://git@github.com/repo.git"
+        );
+
+        let auth_failed = "fatal: Basic Authentication failed for 'https://example.com/repo.git/'";
+        assert_eq!(
+            sanitize_git_credentials(auth_failed),
+            "fatal: Basic Authentication failed for 'https://example.com/repo.git/'"
+        );
+        let auth_failed_err = GitCommandError::BadExit(128, String::new(), auth_failed.to_string());
+        assert!(auth_failed_err.is_access_denied());
 
         let query_param = "fetching https://example.com/repo.git?access_token=secret123&foo=bar";
         assert_eq!(
