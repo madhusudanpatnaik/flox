@@ -204,7 +204,8 @@ impl EventsBuffer {
             .context("Could not lock v2 events buffer")?;
 
         remove_file_if_present(&data_dir.join(EVENTS_BUFFER_FILE_NAME))
-            .context("Could not delete v2 events buffer file")
+            .context("Could not delete v2 events buffer file")?;
+        remove_file_if_present(&lock_file_path).context("Could not delete v2 events lock file")
     }
 
     pub(crate) fn is_expired(&self, expiry: Duration) -> bool {

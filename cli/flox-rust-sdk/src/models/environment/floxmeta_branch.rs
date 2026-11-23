@@ -86,7 +86,6 @@ pub struct FloxmetaBranch {
     floxmeta: FloxMeta,
     branch: String,
     remote_branch: String,
-    _lock: Option<std::fs::File>,
 }
 
 #[derive(Debug, Error)]
@@ -171,7 +170,7 @@ impl FloxmetaBranch {
     ) -> Result<(Self, GenerationLock), FloxmetaBranchError> {
         // Acquire lock
 
-        let lock_file = acquire_floxmeta_lock(&floxmeta_dir(flox, &pointer.owner))?;
+        let _lock = acquire_floxmeta_lock(&floxmeta_dir(flox, &pointer.owner))?;
 
         // Open or clone floxmeta
         let floxmeta = open_or_clone_floxmeta(flox, pointer)?;
@@ -189,7 +188,6 @@ impl FloxmetaBranch {
                 floxmeta,
                 branch: local_branch,
                 remote_branch,
-                _lock: Some(lock_file),
             },
             lock,
         ))
@@ -733,7 +731,6 @@ pub mod test_helpers {
             },
             branch: "example.hash".into(),
             remote_branch: "example".into(),
-            _lock: None,
         }
     }
 }
