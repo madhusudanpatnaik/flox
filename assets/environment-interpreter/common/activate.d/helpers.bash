@@ -51,10 +51,15 @@ function source_profile_d {
     return 1
   }
 
-  for profile_script in "$_profile_d"/*.sh; do
-    [ -e "$profile_script" ] || continue
+  declare -a _profile_scripts
+  read -r -a _profile_scripts < <(
+    cd "$_profile_d" || exit
+    shopt -s nullglob
+    echo *.sh
+  )
+  for profile_script in "${_profile_scripts[@]}"; do
     # shellcheck disable=SC1090 # from rendered environment
-    source "$profile_script"
+    source "$_profile_d/$profile_script"
   done
 
   # shellcheck disable=SC1091 # from rendered environment
@@ -85,12 +90,16 @@ function source_plugin_profile_d {
     return 1
   }
 
-  for profile_script in "$_profile_d"/*.sh; do
-    [ -e "$profile_script" ] || continue
-    _script_name="${profile_script##*/}"
-    if [ ! -e "$_interpreter_profile_d/$_script_name" ]; then
+  declare -a _profile_scripts
+  read -r -a _profile_scripts < <(
+    cd "$_profile_d" || exit
+    shopt -s nullglob
+    echo *.sh
+  )
+  for profile_script in "${_profile_scripts[@]}"; do
+    if [ ! -e "$_interpreter_profile_d/$profile_script" ]; then
       # shellcheck disable=SC1090 # from rendered environment
-      source "$profile_script"
+      source "$_profile_d/$profile_script"
     fi
   done
 }

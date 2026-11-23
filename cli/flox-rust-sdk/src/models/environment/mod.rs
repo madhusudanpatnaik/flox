@@ -1271,7 +1271,9 @@ fn services_socket_path(id: &str, flox: &Flox) -> Result<PathBuf, EnvironmentErr
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(runtime_dir, std::fs::Permissions::from_mode(0o700));
+        if let Err(e) = std::fs::set_permissions(runtime_dir, std::fs::Permissions::from_mode(0o700)) {
+            tracing::debug!("Failed to set permissions on services socket directory: {e}");
+        }
     }
 
     Ok(socket_path)

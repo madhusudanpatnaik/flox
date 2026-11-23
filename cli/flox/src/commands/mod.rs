@@ -301,7 +301,9 @@ impl FloxArgs {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = tokio::fs::set_permissions(&runtime_dir, std::fs::Permissions::from_mode(0o700)).await;
+            if let Err(e) = tokio::fs::set_permissions(&runtime_dir, std::fs::Permissions::from_mode(0o700)).await {
+                tracing::debug!("Failed to set permissions on runtime directory: {e}");
+            }
         }
 
         // prepare a temp dir for the run:
@@ -310,7 +312,9 @@ impl FloxArgs {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = tokio::fs::set_permissions(&process_dir, std::fs::Permissions::from_mode(0o700)).await;
+            if let Err(e) = tokio::fs::set_permissions(&process_dir, std::fs::Permissions::from_mode(0o700)).await {
+                tracing::debug!("Failed to set permissions on process directory: {e}");
+            }
         }
 
         // `temp_dir` will automatically be removed from disk when the function returns

@@ -179,14 +179,13 @@ pub fn generate_fish_profile_commands(
                 r#"set -gx _FLOX_ENV_DIRS_ADD_SBIN (if set -q _FLOX_ENV_DIRS_ADD_SBIN; echo "$_FLOX_ENV_DIRS_ADD_SBIN"; else; echo empty; end);"#.to_stmt()
             );
 
-            let escaped_flox_activations =
-                shell_escape::escape(args.flox_activations.to_string_lossy());
-            let escaped_flox_env = shell_escape::escape(args.flox_env.to_string_lossy());
             stmts.push(
                 format!(
-                    r#"{escaped_flox_activations} set-env-dirs --shell {shell} --flox-env {escaped_flox_env} --env-dirs "$FLOX_ENV_DIRS" --sbin-dirs "$_FLOX_ENV_DIRS_ADD_SBIN"{add_sbin} | source;"#,
-                    shell = Shell::Fish,
-                    add_sbin = if args.add_sbin { " --add-sbin" } else { "" },
+                    r#"{} set-env-dirs --shell {} --flox-env "{}" --env-dirs "$FLOX_ENV_DIRS" --sbin-dirs "$_FLOX_ENV_DIRS_ADD_SBIN"{} | source;"#,
+                    args.flox_activations.display(),
+                    Shell::Fish,
+                    args.flox_env.display(),
+                    if args.add_sbin { " --add-sbin" } else { "" },
                 )
                 .to_stmt(),
             );
@@ -197,8 +196,9 @@ pub fn generate_fish_profile_commands(
             );
 
             stmts.push(format!(
-                r#"{escaped_flox_activations} fix-paths --shell {shell} --env-dirs "$FLOX_ENV_DIRS" --sbin-dirs "$_FLOX_ENV_DIRS_ADD_SBIN" --path "$PATH" --manpath "$MANPATH" | source;"#,
-                shell = Shell::Fish,
+                r#"{} fix-paths --shell {} --env-dirs "$FLOX_ENV_DIRS" --sbin-dirs "$_FLOX_ENV_DIRS_ADD_SBIN" --path "$PATH" --manpath "$MANPATH" | source;"#,
+                args.flox_activations.display(),
+                Shell::Fish,
             ).to_stmt());
         },
         Action::Deactivate(_) => {
@@ -208,15 +208,14 @@ pub fn generate_fish_profile_commands(
 
     match action {
         Action::Activate { args, .. } => {
-            let escaped_flox_activations =
-                shell_escape::escape(args.flox_activations.to_string_lossy());
             stmts.push(
                 r#"set -g  _FLOX_SOURCED_PROFILE_SCRIPTS (if set -q _FLOX_SOURCED_PROFILE_SCRIPTS; echo "$_FLOX_SOURCED_PROFILE_SCRIPTS"; else; echo ""; end);"#.to_string()
             .to_stmt());
 
             stmts.push(format!(
-                r#"{escaped_flox_activations} profile-scripts --shell {shell} --already-sourced-env-dirs  "$_FLOX_SOURCED_PROFILE_SCRIPTS" --env-dirs "$FLOX_ENV_DIRS" | source;"#,
-                shell = Shell::Fish,
+                r#"{} profile-scripts --shell {} --already-sourced-env-dirs  "$_FLOX_SOURCED_PROFILE_SCRIPTS" --env-dirs "$FLOX_ENV_DIRS" | source;"#,
+                args.flox_activations.display(),
+                Shell::Fish,
             ).to_stmt());
         },
         Action::Deactivate(ctx) => {
@@ -229,13 +228,12 @@ pub fn generate_fish_profile_commands(
             // value (nested), so runtime `$FLOX_ENV` is not a reliable
             // handle on the env we're tearing down. The fallback below
             // mirrors the activate-side initializer for unset vars.
-            let escaped_flox_activations =
-                shell_escape::escape(ctx.flox_activations.to_string_lossy());
-            let escaped_flox_env = shell_escape::escape(ctx.flox_env.to_string_lossy());
             stmts.push(
                 format!(
-                    r#"{escaped_flox_activations} profile-scripts-deactivate --shell {shell} --env {escaped_flox_env} --already-sourced-env-dirs (if set -q _FLOX_SOURCED_PROFILE_SCRIPTS; echo "$_FLOX_SOURCED_PROFILE_SCRIPTS"; else; echo ""; end) | source;"#,
-                    shell = Shell::Fish,
+                    r#"{} profile-scripts-deactivate --shell {} --env '{}' --already-sourced-env-dirs (if set -q _FLOX_SOURCED_PROFILE_SCRIPTS; echo "$_FLOX_SOURCED_PROFILE_SCRIPTS"; else; echo ""; end) | source;"#,
+                    ctx.flox_activations.display(),
+                    Shell::Fish,
+                    ctx.flox_env.display()
                 )
                 .to_stmt(),
             );
